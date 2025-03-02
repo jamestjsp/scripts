@@ -80,7 +80,7 @@ This guide walks through setting up Slycot in a Windows environment using MinGW,
 
 ### Install Required Python Packages
 ```bash
-pip install numpy scipy scikit-build pytest wheel setuptools
+pip install numpy scipy scikit-build pytest wheel setuptools setuptools_scm
 ```
 
 ## 🧪 Installing Slycot
