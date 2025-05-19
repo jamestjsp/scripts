@@ -5,6 +5,7 @@ import tempfile
 import shutil
 import sys
 import site
+import importlib.util
 
 def main():
     # Set environment variables for MinGW toolchain
@@ -31,6 +32,48 @@ def main():
         print(f"Removing {build_dir}")
         shutil.rmtree(build_dir, ignore_errors=True)
 
+    # Install all required packages for building and running Slycot
+    print("\n===== Installing Required Packages =====")
+    required_packages = [
+        "numpy<2.0",  # Use NumPy 1.x which is compatible with Slycot
+        "scipy",
+        "scikit-build",
+        "pytest",
+        "wheel",
+        "setuptools",
+        "setuptools_scm"
+    ]
+    
+    try:
+        print(f"Installing packages: {', '.join(required_packages)}")
+        subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade"] + required_packages, check=True)
+        print("All required packages installed successfully")
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to install required packages: {e}")
+        return
+    
+    # Check NumPy version for compatibility
+    try:
+        import numpy
+        numpy_version = numpy.__version__
+        print(f"Using NumPy version: {numpy_version}")
+        if numpy_version.startswith('2.'):
+            print("WARNING: NumPy 2.x detected. Slycot may not be compatible with NumPy 2.x.")
+            print("Consider using NumPy 1.x (downgrade to numpy<2.0) for better compatibility.")
+            proceed = input("Continue anyway? (y/n): ")
+            if proceed.lower() != 'y':
+                print("Installation aborted.")
+                return
+    except ImportError:
+        print("Could not verify NumPy version.")
+    
+    # Get NumPy include directory
+    numpy_include_dir = get_numpy_include_dir()
+    if not numpy_include_dir:
+        print("Failed to locate NumPy include directory!")
+        return
+    print(f"NumPy include directory: {numpy_include_dir}")
+
     # Create wheels directory if it doesn't exist
     if not os.path.exists("wheels"):
         os.makedirs("wheels")
@@ -44,20 +87,41 @@ def main():
         "--config-settings=cmake.define.CMAKE_C_COMPILER=gcc",
         "--config-settings=cmake.define.CMAKE_CXX_COMPILER=g++",
         "--config-settings=cmake.define.CMAKE_Fortran_COMPILER=gfortran",
-        "--config-settings=cmake.define.CMAKE_Fortran_FLAGS=-ff2c -fdefault-integer-8 -fdefault-real-8 -fPIC"
+        "--config-settings=cmake.define.CMAKE_Fortran_FLAGS=-ff2c -fdefault-integer-8 -fdefault-real-8 -fPIC",
+        f"--config-settings=cmake.define.Python_NumPy_INCLUDE_DIR={numpy_include_dir}",
+        f"--config-settings=cmake.define.NumPy_INCLUDE_DIR={numpy_include_dir}"
     ]
     
-    subprocess.run(cmd, check=True)
+    try:
+        print("\n===== Building Slycot wheel =====")
+        print(f"Running command: {' '.join(cmd)}")
+        subprocess.run(cmd, check=True)
+        
+        # Install from the saved wheel
+        print("\n===== Installing from saved wheel =====")
+        subprocess.run(["pip", "install", "--no-index", "--find-links=wheels", "slycot"], check=True)
+        
+        # Copy required DLLs to Slycot installation location
+        copy_required_dlls()
+        
+        # Test the Slycot installation
+        test_slycot()
+        
+    except subprocess.CalledProcessError as e:
+        print(f"\n❌ Error during build/install process: {e}")
+        print("You might try running with elevated privileges or checking your environment setup.")
+        sys.exit(1)
 
-    # Install from the saved wheel
-    print("\nInstalling from saved wheel...")
-    subprocess.run(["pip", "install", "--no-index", "--find-links=wheels", "slycot"], check=True)
-    
-    # Copy required DLLs to Slycot installation location
-    copy_required_dlls()
-    
-    # Test the Slycot installation
-    test_slycot()
+def get_numpy_include_dir():
+    """Get the NumPy include directory"""
+    try:
+        numpy_spec = importlib.util.find_spec("numpy")
+        if numpy_spec and numpy_spec.origin:
+            import numpy
+            return numpy.get_include()
+    except (ImportError, AttributeError) as e:
+        print(f"Error finding NumPy: {e}")
+    return None
 
 def get_site_packages():
     """Get the correct site-packages directory, considering virtual environments"""
@@ -158,6 +222,16 @@ def test_slycot():
         # Check test result
         if result.returncode == 0:
             print("\n✅ Slycot tests PASSED - Installation successful!")
+            
+            # Check for warnings in the output
+            if "warning" in result.stdout.lower() or "warning" in result.stderr.lower():
+                print("\nNote: Some warnings were detected during testing. These are usually harmless,")
+                print("but you might want to review them in the test output above.")
+            
+            # Add installation success information
+            print("\nSlycot is now installed and ready to use!")
+            print("You can import it in your Python code with: import slycot")
+            print("For examples and documentation, visit: https://github.com/python-control/Slycot")
         else:
             print("\n❌ Slycot tests FAILED - There may be issues with the installation.")
             print(f"Exit code: {result.returncode}")
