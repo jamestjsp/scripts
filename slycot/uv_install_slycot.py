@@ -224,12 +224,20 @@ def test_slycot():
 
 def main():
     """Main function to orchestrate the installation process."""
-    mingw_path = check_prerequisites()
-    setup_virtual_env()
-    install_dependencies()
-    if install_slycot():
-        copy_required_dlls(mingw_path)
-        test_slycot()
+    try:
+        mingw_path = check_prerequisites()
+        setup_virtual_env()
+        install_dependencies()
+        if install_slycot():
+            copy_required_dlls(mingw_path)
+            test_slycot()
+    finally:
+        # Clean up the temporary wheels directory
+        if os.path.isdir("wheels"):
+            print("\n===== Cleaning Up =====")
+            print("Removing temporary 'wheels' directory...")
+            shutil.rmtree("wheels")
+            print("✅ Cleanup complete.")
 
 if __name__ == "__main__":
     main()
