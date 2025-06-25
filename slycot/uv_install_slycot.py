@@ -60,7 +60,8 @@ def install_dependencies():
         "scikit-build",
         "wheel",
         "pytest",
-        "delvewheel"  # Add delvewheel here
+        "build",  # Add build package for creating wheels
+        "delvewheel"
     ]
     try:
         print(f"Installing: {', '.join(required_packages)}")
@@ -82,22 +83,37 @@ def build_and_repair_wheel():
     build_env["CXX"] = "g++"
     
     try:
-        # 1. Build the initial wheel
-        print("Building Slycot wheel...")
-        build_cmd = [
-            "uv", "run", "pip", "wheel",
-            "--wheel-dir=wheels",
-            "--no-build-isolation",
-            "slycot",
-            "--config-settings=cmake.define.CMAKE_Fortran_FLAGS=-ff2c -fdefault-integer-8 -fdefault-real-8"
+        # 1. Install slycot from source to trigger build, then create wheel
+        print("Installing Slycot from source to build...")
+        
+        # First install slycot from source (this will build it)
+        install_cmd = [
+            "uv", "pip", "install", 
+            "--no-binary=slycot", 
+            "--force-reinstall",
+            "slycot"
         ]
-        subprocess.run(build_cmd, check=True, env=build_env, capture_output=True)
-        print("✅ Slycot wheel built successfully.")
+        subprocess.run(install_cmd, check=True, env=build_env)
+        print("✅ Slycot built and installed from source.")
+        
+        # 2. Create wheel directory and use pip through uv run --with
+        print("Creating wheel from installed package...")
+        os.makedirs("wheels", exist_ok=True)
+        
+        # Use pip through uv run --with to create wheel
+        wheel_cmd = [
+            "uv", "run", "--with", "pip", "pip", "wheel",
+            "--wheel-dir=wheels",
+            "--no-deps",
+            "slycot"
+        ]
+        subprocess.run(wheel_cmd, check=True, env=build_env)
+        print("✅ Slycot wheel created successfully.")
         
         # Find the built wheel
         wheel_path = glob.glob("wheels/slycot-*.whl")[0]
         
-        # 2. Repair the wheel with delvewheel
+        # 3. Repair the wheel with delvewheel
         print(f"\nRepairing wheel '{wheel_path}' with delvewheel...")
         # Add vcpkg libs to PATH for delvewheel if not already there
         vcpkg_bin_path = os.path.join(os.environ.get("VCPKG_ROOT", "C:\\vcpkg"), "installed", "x64-windows", "bin")
@@ -105,15 +121,16 @@ def build_and_repair_wheel():
         repair_env["PATH"] = f"{vcpkg_bin_path};{repair_env['PATH']}"
         
         repair_cmd = ["uv", "run", "delvewheel", "repair", wheel_path]
-        subprocess.run(repair_cmd, check=True, env=repair_env, capture_output=True)
+        subprocess.run(repair_cmd, check=True, env=repair_env)
         print("✅ Wheel repaired successfully. Final wheel is in 'wheelhouse' directory.")
         
-        # 3. Install the repaired wheel
+        # 4. Install the repaired wheel
         repaired_wheel_path = glob.glob("wheelhouse/slycot-*.whl")[0]
         print(f"\nInstalling repaired wheel: {repaired_wheel_path}...")
-        install_cmd = ["uv", "pip", "install", repaired_wheel_path]
-        subprocess.run(install_cmd, check=True, capture_output=True)
+        install_cmd = ["uv", "pip", "install", "--force-reinstall", repaired_wheel_path]
+        subprocess.run(install_cmd, check=True)
         print("✅ Slycot installed successfully from repaired wheel.\n")
+        
         return True
 
     except (subprocess.CalledProcessError, IndexError) as e:
